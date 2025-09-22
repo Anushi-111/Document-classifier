@@ -1,117 +1,103 @@
 import shutil
 import os
-import traceback
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import uuid
 
-# Import from your other backend files
-from .text_extractor import extract_text_from_pdf
-from .preprocessor import preprocess_report
-from .classifytesting import classify_text
-from .config import UPLOAD_DIR, LABEL_REPORT, LABEL_PRESCRIPTION, LABEL_IRRELEVANT
+# Import from your existing modules
+from backend.text_extractor import extract_text_from_pdf
+from backend.classification_preprocessor import preprocess_text_for_classification
+from backend.classifytesting import classify_text
+from backend.preprocessor import preprocess_report
+from backend.config import UPLOAD_DIR, LABEL_REPORT, LABEL_PRESCRIPTION, LABEL_IRRELEVANT
 
-app = FastAPI(title="Document Classification API")
+# --- FastAPI App Initialization ---
+app = FastAPI(title="Document Classifier API")
 
-# --- CORS Middleware ---
-# This is crucial for allowing your friend's frontend to communicate with your backend.
+# --- CORS Configuration ---
+# This allows your frontend to communicate with your backend.
+# The "null" origin is the final fix that allows testing with a local HTML file.
 origins = [
     "http://localhost",
-    "http://localhost:3000",  # Example for a React frontend
-    "http://localhost:8080",  # Example for a Vue frontend
-    "null",                   # Allows opening an HTML file directly from the filesystem
-    "ButterflyPretty.pythonanywhere.com",
-    "https://document-classifier-m9yb.onrender.com",
+    "http://localhost:3000",
+    "null",  # <-- CRITICAL LINE FOR LOCAL FILE TESTING
+    "https://document-classifier-m9yb.onrender.com" # Your live Render URL
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# --- Ensure upload directory exists ---
-# This line creates the 'uploaded_docs' folder if it doesn't already exist.
+# --- Directory Setup ---
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- API Endpoints ---
+@app.get("/health", summary="Health Check")
+async def health_check():
+    """A simple endpoint to check if the server is running."""
+    return {"status": "ok"}
 
-@app.get("/health")
-def health_check():
-    """
-    A simple endpoint to check if the server is running correctly.
-    """
-    print("Health check endpoint was hit successfully.")
-    return JSONResponse(content={"status": "ok"})
-
-
-@app.post("/upload-document/")
+@app.post("/upload-document/", summary="Upload and Classify Document")
 async def upload_document(file: UploadFile = File(...)):
     """
-    Receives a document, classifies it, and extracts data if it's a report.
+    Receives a PDF file, classifies it, and if it's a report,
+    extracts structured data.
     """
-    # 1. Save the uploaded file to a temporary location
-    temp_file_path = os.path.join(UPLOAD_DIR, f"temp_{file.filename}")
+    temp_file_path = os.path.join(UPLOAD_DIR, f"temp_{uuid.uuid4()}_{file.filename}")
+
     try:
+        # 1. Save the uploaded file temporarily
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        print(f"[INFO] File saved temporarily to: '{temp_file_path}'")
+        print(f"[INFO] File temporarily saved to: {temp_file_path}")
 
-        # 2. Extract text from the document (PDF)
-        print("[INFO] Step 1: Extracting text...")
+        # 2. Extract text from the PDF
         extracted_text = extract_text_from_pdf(temp_file_path)
-        if not extracted_text:
-            print("[WARNING] No text could be extracted from the document.")
-            raise HTTPException(status_code=400, detail="Could not extract any text from the document. It might be empty or corrupted.")
+        
+        # --- Helpful debugging line to see what the server's OCR extracts ---
+        print("--- EXTRACTED TEXT ---")
+        print(extracted_text)
+        print("--- END OF TEXT ---")
+        
+        if not extracted_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract any text from the document.")
 
-        # 3. Classify the extracted text
-        print("[INFO] Step 2: Classifying document...")
+        # 3. Classify the document type
         prediction = classify_text(extracted_text)
-        print(f"  -> Model prediction: '{prediction}'")
+        print(f"[INFO] Model prediction: '{prediction}'")
 
-        # 4. Handle the prediction result
+        # 4. Process based on classification
         if prediction == LABEL_REPORT:
-            print("[INFO] Step 3: Document classified as a Report. Extracting structured data...")
-            report_data = preprocess_report(extracted_text)
-            
-            # Convert DataFrame to a list of dictionaries for JSON response
-            data_list = report_data.to_dict(orient='records')
-
-            print(f"  -> [ACCEPTED] Report processed. Found {len(data_list)} items.")
+            print("[INFO] Document classified as a Report. Extracting structured data...")
+            report_df = preprocess_report(extracted_text)
+            report_data = report_df.to_dict(orient="records")
+            print(f"[ACCEPTED] Processed report with {len(report_data)} rows.")
             return JSONResponse(
-                content={
-                    "status": "success",
-                    "type": LABEL_REPORT,
-                    "data": data_list,
-                    "message": "Report processed successfully."
-                }
+                content={"status": "success", "type": prediction, "data": report_data, "message": "Report processed successfully."}
+            )
+
+        elif prediction == LABEL_PRESCRIPTION:
+            print("[ACCEPTED] Document classified as a Prescription.")
+            return JSONResponse(
+                content={"status": "success", "type": prediction, "message": "Prescription submitted successfully."}
             )
         
-        elif prediction == LABEL_PRESCRIPTION:
-            print(f"  -> [ACCEPTED] Document classified as a Prescription.")
-            return JSONResponse(
-                content={
-                    "status": "success",
-                    "type": LABEL_PRESCRIPTION,
-                    "message": "Prescription submitted successfully."
-                }
-            )
+        else: # The prediction is 'irrelevant'
+            print(f"[REJECTED] Document classified as Irrelevant.")
+            raise HTTPException(status_code=400, detail="The uploaded document is not a valid report or prescription.")
 
-        else: # The document is irrelevant
-            print(f"  -> [REJECTED] Document classified as Irrelevant.")
-            raise HTTPException(
-                status_code=400,
-                detail="The uploaded document is not a valid report or prescription."
-            )
-
+    except HTTPException as http_exc:
+        # Re-raise HTTP exceptions to be handled by FastAPI
+        raise http_exc
     except Exception as e:
         print(f"[CRITICAL ERROR] An unexpected error occurred: {e}")
-        # Print the full traceback to the console for detailed debugging
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
-
+        # Return a generic server error
+        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
+    
     finally:
         # 5. This cleanup step ALWAYS runs, deleting the temporary file
         if os.path.exists(temp_file_path):
