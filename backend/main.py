@@ -16,12 +16,11 @@ from backend.config import UPLOAD_DIR, LABEL_REPORT, LABEL_PRESCRIPTION, LABEL_I
 app = FastAPI(title="Document Classifier API")
 
 # --- CORS Configuration ---
-# This allows your frontend to communicate with your backend.
-# The "null" origin is the final fix that allows testing with a local HTML file.
+# This allows your frontend to communicate with your backend
 origins = [
     "http://localhost",
     "http://localhost:3000",
-    "null",  # <-- CRITICAL LINE FOR LOCAL FILE TESTING
+    "null",  # <-- THIS IS THE CRITICAL LINE FOR LOCAL FILE TESTING
     "https://document-classifier-m9yb.onrender.com" # Your live Render URL
 ]
 app.add_middleware(
@@ -50,15 +49,12 @@ async def upload_document(file: UploadFile = File(...)):
     temp_file_path = os.path.join(UPLOAD_DIR, f"temp_{uuid.uuid4()}_{file.filename}")
 
     try:
-        # 1. Save the uploaded file temporarily
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         print(f"[INFO] File temporarily saved to: {temp_file_path}")
 
-        # 2. Extract text from the PDF
         extracted_text = extract_text_from_pdf(temp_file_path)
         
-        # --- Helpful debugging line to see what the server's OCR extracts ---
         print("--- EXTRACTED TEXT ---")
         print(extracted_text)
         print("--- END OF TEXT ---")
@@ -66,11 +62,9 @@ async def upload_document(file: UploadFile = File(...)):
         if not extracted_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract any text from the document.")
 
-        # 3. Classify the document type
         prediction = classify_text(extracted_text)
         print(f"[INFO] Model prediction: '{prediction}'")
 
-        # 4. Process based on classification
         if prediction == LABEL_REPORT:
             print("[INFO] Document classified as a Report. Extracting structured data...")
             report_df = preprocess_report(extracted_text)
@@ -86,20 +80,17 @@ async def upload_document(file: UploadFile = File(...)):
                 content={"status": "success", "type": prediction, "message": "Prescription submitted successfully."}
             )
         
-        else: # The prediction is 'irrelevant'
+        else:
             print(f"[REJECTED] Document classified as Irrelevant.")
             raise HTTPException(status_code=400, detail="The uploaded document is not a valid report or prescription.")
 
     except HTTPException as http_exc:
-        # Re-raise HTTP exceptions to be handled by FastAPI
         raise http_exc
     except Exception as e:
         print(f"[CRITICAL ERROR] An unexpected error occurred: {e}")
-        # Return a generic server error
         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
     
     finally:
-        # 5. This cleanup step ALWAYS runs, deleting the temporary file
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
             print(f"  -> Cleaned up temporary file: '{temp_file_path}'")
