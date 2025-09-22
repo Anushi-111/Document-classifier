@@ -1,20 +1,15 @@
-# This is a Render Blueprint that tells Render how to build and run your service.
-# It is the most reliable way to configure a deployment.
+# This blueprint tells Render to use our custom build script.
+# It is the most direct and reliable way to deploy.
 
 services:
-  # A name for our web service
   - name: document-classifier
-    # --- The Fix is here ---
-    # This line tells Render that we are deploying a "Web Service".
-    # This was the missing piece causing the error.
+    # We explicitly define this as a web service.
     type: web
-    # The runtime environment for our service.
+    # The runtime environment is Python.
     env: python
-    # The command to install all our Python libraries
-    buildCommand: "pip install -r requirements.txt"
-    # The command to start our FastAPI server
+    # CRITICAL: This tells Render to run our build.sh script to set everything up.
+    # It will install Tesseract, Poppler, and all Python libraries.
+    buildCommand: "./build.sh"
+    # The start command remains the same.
     startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
-    # This section installs the system-level programs we need.
-    systemDependencies:
-      - key: tesseract-ocr
-      - key: poppler-utils
+
