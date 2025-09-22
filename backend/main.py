@@ -21,6 +21,7 @@ origins = [
     "http://localhost:8080",  # Example for a Vue frontend
     "null",                   # Allows opening an HTML file directly from the filesystem
     "ButterflyPretty.pythonanywhere.com",
+    "https://document-classifier-m9yb.onrender.com",
 ]
 
 app.add_middleware(
