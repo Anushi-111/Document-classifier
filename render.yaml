@@ -1,0 +1,16 @@
+# This is a Render Blueprint that tells Render how to build and run your service.
+# It is the most reliable way to configure a deployment.
+
+services:
+  # A name for our web service
+  - name: document-classifier
+    # The runtime environment for our service. Render will use Python.
+    env: python
+    # The command to install all our Python libraries
+    buildCommand: "pip install -r requirements.txt"
+    # The command to start our FastAPI server
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    # CRITICAL: This section installs the system-level programs we need.
+    systemDependencies:
+      - key: tesseract-ocr
+      - key: poppler-utils
