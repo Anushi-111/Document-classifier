@@ -4,13 +4,17 @@
 services:
   # A name for our web service
   - name: document-classifier
-    # The runtime environment for our service. Render will use Python.
+    # --- The Fix is here ---
+    # This line tells Render that we are deploying a "Web Service".
+    # This was the missing piece causing the error.
+    type: web
+    # The runtime environment for our service.
     env: python
     # The command to install all our Python libraries
     buildCommand: "pip install -r requirements.txt"
     # The command to start our FastAPI server
     startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
-    # CRITICAL: This section installs the system-level programs we need.
+    # This section installs the system-level programs we need.
     systemDependencies:
       - key: tesseract-ocr
       - key: poppler-utils
